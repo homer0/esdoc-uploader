@@ -27,7 +27,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 /**
- * ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) and tell it
+ * ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) API in order
  * to generage the documentation for your project.
  * @version  1.0.0
  */
@@ -35,8 +35,10 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 var ESDocUploader = (function () {
     /**
      * Create a new instance of the uploader.
-     * @param  {String} [url=null] - This is the GitHub repository url. You can also ignore it and
-     *                               it will automatically search for it on your `package.json`.
+     * @param  {String} [url=null] - This is the GitHub repository url. The required format its
+     *                               `git@github.com:[author]/[repository].git`. You can also
+     *                               ignore it and it will automatically search for it on your
+     *                               `package.json`.
      * @public
      */
 
@@ -193,6 +195,7 @@ var ESDocUploader = (function () {
             var callback = arguments.length <= 0 || arguments[0] === undefined ? function () {} : arguments[0];
 
             if (this.url === null) {
+                this._callback = callback;
                 this._logError('invalidUrl');
             } else if (this._uploading) {
                 this._logError('uploading');
@@ -350,8 +353,9 @@ var ESDocUploader = (function () {
         value: function _finish() {
             this._uploading = false;
             this._stopIndicator();
-            _logUtil2.default.debug(this._messages.success + ' ' + this._getAPIUrl('path'));
-            this._callback();
+            var docUrl = this._getAPIUrl('path');
+            _logUtil2.default.debug(this._messages.success + ' ' + docUrl);
+            this._callback(true, docUrl);
         }
         /**
          * Returns a url for the ESDoc API.
@@ -405,6 +409,9 @@ var ESDocUploader = (function () {
 
             _logUtil2.default.error(error);
             this._stopIndicator(false);
+            if (this._callback) {
+                this._callback(false);
+            }
         }
         /**
          * Starts showing the progress indicator on the terminal.
