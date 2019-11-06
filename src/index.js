@@ -1,8 +1,6 @@
-
 import fs from 'fs';
 import path from 'path';
 import request from 'request';
-import logger from 'log-util';
 /**
  * ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) API in order
  * to generage the documentation for your project.
@@ -298,7 +296,11 @@ export default class ESDocUploader {
         this._uploading = false;
         this._stopIndicator();
         const docUrl = this._getAPIUrl('path');
-        logger.debug(this._messages.success + ' ' + docUrl);
+        console.log(
+            '\x1b[30m[%s] \x1b[32m%s\x1b[0m',
+            now,
+            `${this._messages.success} ${docUrl}`
+        );
         this._callback(true, docUrl);
     }
     /**
@@ -342,7 +344,7 @@ export default class ESDocUploader {
             error = error.message;
         }
 
-        logger.error(error);
+        console.log('\x1b[30m[%s] \x1b[31m%s\x1b[0m', new Date(), error);
         this._stopIndicator(false);
         if (this._callback) {
             this._callback(false);
