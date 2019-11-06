@@ -33,7 +33,8 @@
     "prepublish": "npm run build",
     "test": "jest ./__tests__/index-test.js",
     "coverage": "npm test; open ./coverage/lcov-report/index.html",
-    "lint": "eslint ./src/ ./__tests__/; jscs ./src/ ./__tests__/",
+    "lint": "./utils/scripts/lint",
+    "lint:all": "./utils/scripts/lint-all",
     "docs": "esdoc -c esdoc.json; open docs/index.html",
     "deploy-docs": "node ./dist/uploader.js"
   },
@@ -52,7 +53,7 @@
     ]
   },
   "bin": {
-    "esdoc-uploader": "./dist/uploader.js"
+    "esdoc-uploader": "./src/uploader.js"
   },
-  "main": "dist/index.js"
+  "main": "./src/index.js"
 }
