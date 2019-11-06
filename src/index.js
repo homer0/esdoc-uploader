@@ -1,6 +1,6 @@
+import https from 'https';
 import fs from 'fs';
 import path from 'path';
-import request from 'request';
 /**
  * ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) API in order
  * to generage the documentation for your project.
@@ -64,7 +64,7 @@ export default class ESDocUploader {
          * @ignore
          */
         this._api = {
-            domain: 'https://doc.esdoc.org',
+            host: 'https://doc.esdoc.org',
             create: '/api/create',
         };
         /**
@@ -165,28 +165,30 @@ export default class ESDocUploader {
             this._callback = callback;
             this._uploading = true;
             this._startIndicator();
-            request.post({
-                url: this._getAPIUrl('create'),
-                body: {gitUrl: this.url},
-                json: true,
-            }, ((err, httpResponse, body) => {
-                if (err) {
-                    this._logError(err);
-                } else {
-                    let response = body;
-                    if (typeof response === 'string') {
-                        response = JSON.parse(response);
-                    }
-
-                    if (!response.success) {
-                        this._logError(response.message || 'unexpected');
+            this._postRequest(
+                'create',
+                {gitUrl: this.url},
+                (error, response) => {
+                    if (error) {
+                        this._logError(error);
                     } else {
-                        this._setAPIUrl('path', response.path);
-                        this._setAPIUrl('status', response.path + this._finishFile);
-                        this._startAsking();
+                        const useResponse = typeof response === 'string' ?
+                            JSON.parse(response) :
+                            useResponse;
+
+                        if (useResponse.success) {
+                            this._setAPIUrl('path', useResponse.path);
+                            this._setAPIUrl(
+                                'status',
+                                `${useResponse.path}${this._finishFile}`
+                            );
+                            this._startAsking();
+                        } else {
+                            this._logError(response.message || 'unexpected');
+                        }
                     }
                 }
-            }).bind(this));
+            );
         }
     }
     /**
@@ -272,18 +274,18 @@ export default class ESDocUploader {
      * @ignore
      */
     _ask() {
-        request(this._getAPIUrl('status'), ((err, httpResponse, body) => {
-            if (err || body.indexOf('<html>') > -1) {
+        this._getRequest('status', (error, response) => {
+            if (error || response.includes('<html>')) {
                 this._startAsking();
             } else {
                 const response = JSON.parse(body);
-                if (!response.success) {
-                    this._logError(response.message || 'unexpected');
-                } else {
+                if (response.success) {
                     this._finish();
+                } else {
+                    this._logError(response.message || 'unexpected');
                 }
             }
-        }).bind(this));
+        });
     }
     /**
      * This method is called after it's confirmed that the documentation was successfully uploaded,
@@ -314,6 +316,87 @@ export default class ESDocUploader {
      */
     _getAPIUrl(type) {
         return this._api.domain + this._api[type];
+    }
+    /**
+     * Makes a POST request to the API.
+     * @param {String}          apiPath   The reference name for the path the request is for,
+     *                                    inside the `_api` dictionary.
+     * @param {Object}          body      The body of the request.
+     * @param {RequestCallback} callback  The callback to be invoked when the request is finished.
+     * @private
+     * @ignore
+     */
+    _postRequest(apiPath, body, callback) {
+        const data = JSON.stringify(body);
+        const options = {
+            hostname: this._api.host,
+            path: this._api[apiPath],
+            port: 443,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': data.length,
+            },
+        };
+        const req = this._createAPIRequest(options, callback);
+        req.write(data);
+        req.end();
+    }
+    /**
+     * Makes a GET request to the API.
+     * @param {String}          apiPath   The reference name for the path the request is for,
+     *                                    inside the `_api` dictionary.
+     * @param {RequestCallback} callback  The callback to be invoked when the request is finished.
+     * @private
+     * @ignore
+     */
+    _getRequest(apiPath, callback) {
+        const options = {
+            hostname: this._api.host,
+            path: this._api[apiPath],
+            port: 443,
+            method: 'GET',
+        };
+        const req = this._createAPIRequest(options, callback);
+        req.end();
+    }
+    /**
+     * A wrapper on top of `https.request` that allows the class to make requests, setup the
+     * listeners and resolve everything on a single callback.
+     * @param {Object}           reqOptions  The options for `https.request`.
+     * @param {RequestCallback}  callback    The callback to be invoked when the request is
+     *                                       finished.
+     * @private
+     * @ignore
+     */
+    _createAPIRequest(reqOptions, callback) {
+        return https.request(reqOptions, (res) => {
+            const { statusCode } = res;
+            const chunks = [];
+            res.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            res.on('error', () => {
+                callback(error, null, statusCode);
+            });
+            res.on('end', () => {
+                let response = null;
+                try {
+                    response = Buffer.concat(response).toString();
+                    if (statusCode >= 400) {
+                        callback(
+                            new Error(`The API responded with a ${statusCode}`),
+                            response,
+                            statusCode
+                        );
+                    } else {
+                        callback(null, response, statusCode);
+                    }
+                } catch (error) {
+                    callback(error, response, statusCode);
+                }
+            });
+        });
     }
     /**
      * Set a new type of urlf or the ESDoc API. For example, the first request will return a
