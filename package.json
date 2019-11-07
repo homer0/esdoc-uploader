@@ -23,6 +23,7 @@
     "esdoc-node": "1.0.4",
     "eslint": "^6.6.0",
     "eslint-plugin-homer0": "^2.0.1",
+    "husky": "^3.0.9",
     "jasmine-expect": "^4.0.3",
     "jest-ex": "^6.1.1",
     "jest-cli": "^24.9.0",
@@ -37,5 +38,11 @@
   "bin": {
     "esdoc-uploader": "./src/uploader.js"
   },
-  "main": "./src/index.js"
+  "main": "./src/index.js",
+  "husky": {
+    "hooks": {
+      "pre-commit": "./utils/hooks/pre-commit",
+      "post-merge": "./utils/hooks/post-merge"
+    }
+  }
 }
