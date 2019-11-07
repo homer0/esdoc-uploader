@@ -35,7 +35,7 @@
     "coverage": "npm test; open ./coverage/lcov-report/index.html",
     "lint": "./utils/scripts/lint",
     "lint:all": "./utils/scripts/lint-all",
-    "docs": "esdoc -c esdoc.json; open docs/index.html",
+    "docs": "./utils/scripts/docs",
     "deploy-docs": "node ./dist/uploader.js"
   },
   "jest": {
