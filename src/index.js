@@ -43,7 +43,7 @@ class ESDocUploader {
       noRepository: 'There\'s no repository information in the package.json',
       invalidFormat: 'The repository from the package.json it\'s not valid. ' +
       'Expected format "[author]/[repository]"',
-      onlyGitHub: 'ESDoc only supports GitHub repositories',
+      onlyGithub: 'ESDoc only supports Github repositories',
       success: 'The documentation was successfully uploaded:',
     };
     /**
@@ -53,7 +53,7 @@ class ESDocUploader {
      * @protected
      * @ignore
      */
-    this.url = url === null ? this._retrieveUrlFromPackage() : this._validateUrl(url);
+    this._url = url === null ? this._retrieveUrlFromPackage() : this._validateUrl(url);
     /**
      * A flag to know if the class it's currently uploading the documentation or not.
      * @type {Boolean}
@@ -140,21 +140,25 @@ class ESDocUploader {
      * @ignore
      */
     this._ask = this._ask.bind(this);
+    /**
+     * @ignore
+     */
+    this._runIndicator = this._runIndicator.bind(this);
   }
   /**
    * Checks whether the repository is valid and the class can start uploading the documentation.
    * @return {Boolean}
    */
   canUpload() {
-    return !!this.url;
+    return !!this._url;
   }
   /**
    * Upload your documentation to the ESDoc API.
-   * @param {UploadCallback} [callback=() => {}] An optional callback to be executed after
-   *                                             everthing is ready.
+   * @param {UploadCallback} callback An optional callback to be executed after everthing
+   *                                  is ready.
    */
-  upload(callback = () => {}) {
-    if (this.url === null) {
+  upload(callback) {
+    if (this._url === null) {
       this._callback = callback;
       this._logError('invalidUrl');
     } else if (this._uploading) {
@@ -165,15 +169,12 @@ class ESDocUploader {
       this._startIndicator();
       this._postRequest(
         'create',
-        { gitUrl: this.url },
+        { gitUrl: this._url },
         (error, response) => {
           if (error) {
             this._logError(error);
           } else {
-            const useResponse = typeof response === 'string' ?
-              JSON.parse(response) :
-              response;
-
+            const useResponse = JSON.parse(response);
             if (useResponse.success) {
               this._setAPIPath('path', useResponse.path);
               this._setAPIPath(
@@ -182,12 +183,19 @@ class ESDocUploader {
               );
               this._startAsking();
             } else {
-              this._logError(response.message || 'unexpected');
+              this._logError(useResponse.message || 'unexpected');
             }
           }
         }
       );
     }
+  }
+  /**
+   * The repository url the class will send to the ESDoc API.
+   * @type {?String}
+   */
+  get url() {
+    return this._url;
   }
   /**
    * Tries to retrieve the repository url from the project's `pacakge.json`.
@@ -197,7 +205,12 @@ class ESDocUploader {
    */
   _retrieveUrlFromPackage() {
     const packagePath = path.resolve('./package.json');
-    const packageContents = fs.readFileSync(packagePath, 'utf-8');
+    let packageContents;
+    try {
+      packageContents = fs.readFileSync(packagePath, 'utf-8');
+    } catch (ignore) {
+      // This is ignored because we already have the error going out if there's no package.
+    }
     let result = null;
     if (packageContents) {
       const authorAndRepoParts = 2;
@@ -212,7 +225,7 @@ class ESDocUploader {
           result = this._buildUrl(urlParts[0], urlParts[1]);
         }
       } else if (property.type !== 'git' || !property.url.match(/github/)) {
-        this._logError('onlyGitHub');
+        this._logError('onlyGithub');
       } else {
         const urlParts = property.url.split('/');
         const author = urlParts[urlParts.length - authorAndRepoParts];
@@ -321,7 +334,7 @@ class ESDocUploader {
    */
   _getAPIUrl(apiPath) {
     const usePath = this._api[apiPath];
-    return `https://${this._api.domain}${usePath}`;
+    return `https://${this._api.host}${usePath}`;
   }
   /**
    * Makes a POST request to the API.
@@ -379,16 +392,17 @@ class ESDocUploader {
     return https.request(reqOptions, (res) => {
       const { statusCode } = res;
       const chunks = [];
+      let errored = false;
       res.on('data', (chunk) => {
         chunks.push(chunk);
       });
       res.on('error', (error) => {
+        errored = true;
         callback(error, null, statusCode);
       });
       res.on('end', () => {
-        let response = null;
-        try {
-          response = Buffer.concat(response).toString();
+        if (!errored) {
+          const response = Buffer.concat(chunks).toString();
           const badRequest = 400;
           if (statusCode >= badRequest) {
             callback(
@@ -399,8 +413,6 @@ class ESDocUploader {
           } else {
             callback(null, response, statusCode);
           }
-        } catch (error) {
-          callback(error, response, statusCode);
         }
       });
     });
@@ -447,7 +459,7 @@ class ESDocUploader {
   _startIndicator() {
     const indicatorIntervalTime = 500;
     this._indicatorInterval = setInterval(
-      this._runIndicator.bind(this),
+      this._runIndicator,
       indicatorIntervalTime
     );
   }

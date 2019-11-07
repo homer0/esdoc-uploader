@@ -31,26 +31,12 @@
   "scripts": {
     "build": "babel --presets es2015 -d dist/ src/",
     "prepublish": "npm run build",
-    "test": "jest ./__tests__/index-test.js",
+    "test": "./utils/scripts/test",
     "coverage": "npm test; open ./coverage/lcov-report/index.html",
     "lint": "./utils/scripts/lint",
     "lint:all": "./utils/scripts/lint-all",
     "docs": "./utils/scripts/docs",
     "deploy-docs": "node ./dist/uploader.js"
-  },
-  "jest": {
-    "collectCoverage": true,
-    "collectCoverageOnlyFrom": {
-      "src/index.js": true
-    },
-    "scriptPreprocessor": "<rootDir>/node_modules/babel-jest",
-    "testFileExtensions": ["es6", "js", "jsx"],
-    "moduleFileExtensions": ["js", "json", "jsx", "es6"],
-    "unmockedModulePathPatterns": [
-      "<rootDir>/src",
-      "<rootDir>/__tests__/utils",
-      "<rootDir>/node_modules/"
-    ]
   },
   "bin": {
     "esdoc-uploader": "./src/uploader.js"
