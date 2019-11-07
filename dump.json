@@ -1,0 +1,1532 @@
+[
+  {
+    "__docId__": 0,
+    "kind": "file",
+    "static": true,
+    "variation": null,
+    "name": "src/index.js",
+    "memberof": null,
+    "longname": "src/index.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1,
+    "content": "\nimport fs from 'fs';\nimport path from 'path';\nimport request from 'request';\nimport logger from 'log-util';\n/**\n * ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) and tell it\n * to generage the documentation for your project.\n * @version  1.0.0\n */\nexport default class ESDocUploader {\n    /**\n     * Create a new instance of the uploader.\n     * @param  {String} [url=null] - This is the GitHub repository url. You can also ignore it and\n     *                               it will automatically search for it on your `package.json`.\n     * @public\n     */\n    constructor(url = null) {\n        /**\n         * A list of pre defined messages that the class will log.\n         * @type {Object}\n         * @private\n         * @ignore\n         */\n        this._messages = {\n            constructor: 'The repository url is invalid. ' +\n                'There is likely additional logging output above',\n            invalidUrl: 'The repository url is invalid. You can\\'t upload anything',\n            uploading: 'The documentation is already being uploaded',\n            unexpected: 'Unexpected error, please try again',\n            noPackage: 'There\\'s no package.json in this directory',\n            noRepository: 'There\\'s no repository information in the package.json',\n            invalidFormat: 'The repository from the package.json it\\'s not valid. ' +\n                'Expected format \"[author]/[repository]\"',\n            onlyGitHub: 'ESDoc only supports GitHub repositories',\n            success: 'The documentation was successfully uploaded:',\n        };\n\n        if (url === null) {\n            url = this._retrieveUrlFromPackage();\n        } else {\n            url = this._validateUrl(url);\n        }\n        /**\n         * The repository url. It can be null if the one provided is not valid or if there isn't\n         * one on the `package.json`.\n         * @type {string|null}\n         * @private\n         * @ignore\n         */\n        this.url = url;\n        /**\n         * A flag to know if the class it's currently uploading something.\n         * @type {Boolean}\n         * @private\n         * @ignore\n         */\n        this._uploading = false;\n        /**\n         * A small dictionary used to store information relative to the ESDoc API, like it's\n         * main domain or the path to create a new doc.\n         * @type {Object}\n         * @private\n         * @ignore\n         */\n        this._api = {\n            domain: 'https://doc.esdoc.org',\n            create: '/api/create',\n        };\n        /**\n         * The name of the file where the class it's going to check if the docs were uploaded.\n         * @type {String}\n         * @private\n         * @ignore\n         */\n        this._finishFile = '/.finish.json';\n        /**\n         * The amount of time the class will wait between checks to see if the docs site was\n         * generated.\n         * @type {Number}\n         * @private\n         * @ignore\n         */\n        this._intervalTime = 4000;\n        /**\n         * After the first request, this is where the returned path for the docs on the server\n         * will be stored.\n         * @type {String}\n         * @private\n         * @ignore\n         */\n        this._path = '';\n        /**\n         * A callback that will be executed after confirmation that the docs were generated.\n         * @type {Function}\n         * @private\n         * @ignore\n         */\n        this._callback = null;\n        /**\n         * The text that will show up on the terminal.\n         * @type {String}\n         * @private\n         * @ignore\n         */\n        this._indicatorText = 'Uploading';\n        /**\n         * The amout of time in which the indicator will be updated.\n         * @type {Number}\n         * @private\n         * @ignore\n         */\n        this._indicatorInterval = 1000;\n        /**\n         * A utility counter to know how many dos will be added to the indicator\n         * @type {Number}\n         * @private\n         * @ignore\n         */\n        this._indicatorCounter = -1;\n        /**\n         * After this many iterations, the dots will start to be removed instead of added. When the\n         * counter hits 0, it will start adding again, until it hits this limit.\n         * @type {Number}\n         * @private\n         * @ignore\n         */\n        this._indicatorLimit = 3;\n        /**\n         * A flag to know if the indicator it's currently adding dots or removing them.\n         * @type {Boolean}\n         * @private\n         * @ignore\n         */\n        this._indicatorIncrease = true;\n        /**\n         * If there's no url, log the error message.\n         */\n        if (this.url === null) {\n            this._logError('constructor');\n        }\n    }\n    /**\n     * After the class is istantiated, this method can be used to check if the url is valid and\n     * if the method `upload` can be called\n     * @public\n     */\n    canUpload() {\n        return this.url !== null;\n    }\n    /**\n     * Upload your documentation to the ESDoc API.\n     * @param  {Function} [callback=() => {}] - An optional callback to be executed after\n     * everthing is ready.\n     * @public\n     */\n    upload(callback = () => {}) {\n\n        if (this.url === null) {\n            this._logError('invalidUrl');\n        } else if (this._uploading) {\n            this._logError('uploading');\n        } else {\n            this._callback = callback;\n            this._uploading = true;\n            this._startIndicator();\n            request.post({\n                url: this._getAPIUrl('create'),\n                body: {gitUrl: this.url},\n                json: true,\n            }, ((err, httpResponse, body) => {\n                if (err) {\n                    this._logError(err);\n                } else {\n                    let response = body;\n                    if (typeof response === 'string') {\n                        response = JSON.parse(response);\n                    }\n\n                    if (!response.success) {\n                        this._logError(response.message || 'unexpected');\n                    } else {\n                        this._setAPIUrl('path', response.path);\n                        this._setAPIUrl('status', response.path + this._finishFile);\n                        this._startAsking();\n                    }\n                }\n            }).bind(this));\n        }\n    }\n    /**\n     * Tries to retrieve the repository url from your `pacakge.json`.\n     * @return {String} The repository url that was on your `package.json`.\n     * @private\n     * @ignore\n     */\n    _retrieveUrlFromPackage() {\n        const packagePath = path.resolve('./package.json');\n        const packageContents = fs.readFileSync(packagePath, 'utf-8');\n        let result = null;\n        if (!packageContents) {\n            this._logError('noPackage');\n        } else {\n            const property = JSON.parse(packageContents).repository;\n            if (!property) {\n                this._logError('noRepository');\n            }else if (typeof property === 'string') {\n                const urlParts = property.split('/');\n                if (urlParts.length !== 2) {\n                    this._logError('invalidFormat');\n                } else {\n                    result = this._buildUrl(urlParts[0], urlParts[1]);\n                }\n            } else {\n                if (property.type !== 'git' || !property.url.match(/github/)) {\n                    this._logError('onlyGitHub');\n                } else {\n                    const urlParts = property.url.split('/');\n                    const author = urlParts[urlParts.length - 2];\n                    const repository = urlParts[urlParts.length - 1];\n                    result = this._buildUrl(author, repository);\n                }\n            }\n        }\n\n        return result;\n    }\n    /**\n     * Generates a new url with the required format to use with the ESDoc API.\n     * @param  {String} author     - The GitHub username.\n     * @param  {String} repository - The repository name.\n     * @return {String} The new url, on the required format for ESDoc.\n     * @private\n     * @ignore\n     */\n    _buildUrl(author, repository) {\n        if (repository.indexOf('.git') > -1) {\n            repository = repository.substr(0, repository.length - 4);\n        }\n\n        return 'git@github.com:' + author + '/' + repository + '.git';\n    }\n    /**\n     * Validates a given url to see if it has the required format by the ESDoc API.\n     * @param  {String} url - The url to validate.\n     * @return {String|null} If the url it's valid, it will return it, otherwise, itw will\n     * return null.\n     * @private\n     * @ignore\n     */\n    _validateUrl(url) {\n        let result = null;\n        if (url.match(/^git@github\\.com:[\\w\\d._-]+\\/[\\w\\d._-]+\\.git$/)) {\n            result = url;\n        }\n\n        return result;\n    }\n    /**\n     * This method is called after the initial request to the API, and tells the class to check\n     * every X seconds to see if the documentation was uploaded.\n     * @private\n     * @ignore\n     */\n    _startAsking() {\n        setTimeout(this._ask.bind(this), this._intervalTime);\n    }\n    /**\n     * It makes a request to check if the documentation was uploaded or not.\n     * @private\n     * @ignore\n     */\n    _ask() {\n        request(this._getAPIUrl('status'), ((err, httpResponse, body) => {\n            if (err || body.indexOf('<html>') > -1) {\n                this._startAsking();\n            } else {\n                const response = JSON.parse(body);\n                if (!response.success) {\n                    this._logError(response.message || 'unexpected');\n                } else {\n                    this._finish();\n                }\n            }\n        }).bind(this));\n    }\n    /**\n     * This method is called after it's confirmed that the documentation was successfully uploaded,\n     * and it stops teh indicator, logs a mesage with the url for the documetation and invokes the\n     * callback set in the `upload()` method.\n     * @private\n     * @ignore\n     */\n    _finish() {\n        this._uploading = false;\n        this._stopIndicator();\n        logger.debug(this._messages.success + ' ' + this._getAPIUrl('path'));\n        this._callback();\n    }\n    /**\n     * Returns a url for the ESDoc API.\n     * @param  {String} type - The type of url you need. This is parameter it's the key for the\n     *                         `_api` dictionary.\n     * @return {String} It will return the API domain and the value in the `_api` dictionary for\n     *                  given type.\n     * @private\n     * @ignore\n     */\n    _getAPIUrl(type) {\n        return this._api.domain + this._api[type];\n    }\n    /**\n     * Set a new type of urlf or the ESDoc API. For example, the first request will return a\n     * relative path for the documentation, this class will use this method to save this path\n     * so it can be later be retrieved using `_getAPIUrl` and it wil already have the API main\n     * domain.\n     * @param {String} type - An identifier for your url.\n     * @param {String} url  - The relative url you want to save.\n     * @private\n     * @ignore\n     */\n    _setAPIUrl(type, url) {\n        this._api[type] = url;\n    }\n    /**\n     * Logs an eror message to the terminal.\n     * @param {String|Error} error - This can be the message you want to log, a key for the\n     *                               `_messages` dictionary or an `Error` object.\n     * @private\n     * @ignore\n     */\n    _logError(error) {\n        if (typeof error === 'string') {\n            if (this._messages[error]) {\n                error = this._messages[error];\n            }\n        } else {\n            error = error.message;\n        }\n\n        logger.error(error);\n        this._stopIndicator(false);\n    }\n    /**\n     * Starts showing the progress indicator on the terminal.\n     * @private\n     * @ignore\n     */\n    _startIndicator() {\n        this._indicatorInterval = setInterval(this._runIndicator.bind(this), 500);\n    }\n    /**\n     * The actual method that shows the progress indicator on the terminal.\n     * @private\n     * @ignore\n     */\n    _runIndicator() {\n        let text = this._indicatorText;\n        if (this._indicatorIncrease) {\n            this._indicatorCounter++;\n            if (this._indicatorCounter === this._indicatorLimit) {\n                this._indicatorIncrease = false;\n            }\n        } else {\n            this._indicatorCounter--;\n            if (this._indicatorCounter === 0) {\n                this._indicatorIncrease = true;\n            }\n        }\n\n        for (let i = 0; i < this._indicatorCounter; i++) {\n            text += '.';\n        }\n\n        this._restartLine();\n        this._print(text);\n    }\n    /**\n     * Removes the progress indicator from the terminal.\n     * @private\n     * @ignore\n     */\n    _stopIndicator() {\n        clearInterval(this._indicatorInterval);\n        this._restartLine();\n    }\n    /**\n     * Removes everything on the current terminal line and sets the cursor to the initial\n     * position.\n     * @private\n     * @ignore\n     */\n    _restartLine() {\n        process.stdout.clearLine();\n        process.stdout.cursorTo(0);\n    }\n    /**\n     * Writes a message in the terminal.\n     * @param {String} message - The text to write.\n     * @private\n     * @ignore\n     */\n    _print(message) {\n        process.stdout.write(message);\n    }\n\n}\n"
+  },
+  {
+    "__docId__": 1,
+    "kind": "class",
+    "static": true,
+    "variation": null,
+    "name": "ESDocUploader",
+    "memberof": "src/index.js",
+    "longname": "src/index.js~ESDocUploader",
+    "access": null,
+    "export": true,
+    "importPath": "esdoc-uploader/src/index.js",
+    "importStyle": "ESDocUploader",
+    "description": "ESDocUploader, connects with the [ESDoc hosting service](https://doc.esdoc.org/) and tell it\nto generage the documentation for your project.",
+    "lineNumber": 11,
+    "version": " 1.0.0",
+    "interface": false
+  },
+  {
+    "__docId__": 2,
+    "kind": "constructor",
+    "static": false,
+    "variation": null,
+    "name": "constructor",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#constructor",
+    "access": "public",
+    "description": "Create a new instance of the uploader.",
+    "lineNumber": 18,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": true,
+        "defaultValue": "null",
+        "defaultRaw": null,
+        "name": "url",
+        "description": "This is the GitHub repository url. You can also ignore it and\n                              it will automatically search for it on your `package.json`."
+      }
+    ],
+    "generator": false
+  },
+  {
+    "__docId__": 3,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_messages",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_messages",
+    "access": "private",
+    "description": "A list of pre defined messages that the class will log.",
+    "lineNumber": 25,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Object"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 4,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "url",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#url",
+    "access": "private",
+    "description": "The repository url. It can be null if the one provided is not valid or if there isn't\none on the `package.json`.",
+    "lineNumber": 51,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "string",
+        "null"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 5,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_uploading",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_uploading",
+    "access": "private",
+    "description": "A flag to know if the class it's currently uploading something.",
+    "lineNumber": 58,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Boolean"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 6,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_api",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_api",
+    "access": "private",
+    "description": "A small dictionary used to store information relative to the ESDoc API, like it's\nmain domain or the path to create a new doc.",
+    "lineNumber": 66,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Object"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 7,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_finishFile",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_finishFile",
+    "access": "private",
+    "description": "The name of the file where the class it's going to check if the docs were uploaded.",
+    "lineNumber": 76,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 8,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_intervalTime",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_intervalTime",
+    "access": "private",
+    "description": "The amount of time the class will wait between checks to see if the docs site was\ngenerated.",
+    "lineNumber": 84,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Number"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 9,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_path",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_path",
+    "access": "private",
+    "description": "After the first request, this is where the returned path for the docs on the server\nwill be stored.",
+    "lineNumber": 92,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 10,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_callback",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_callback",
+    "access": "private",
+    "description": "A callback that will be executed after confirmation that the docs were generated.",
+    "lineNumber": 99,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Function"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 11,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorText",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorText",
+    "access": "private",
+    "description": "The text that will show up on the terminal.",
+    "lineNumber": 106,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 12,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorInterval",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorInterval",
+    "access": "private",
+    "description": "The amout of time in which the indicator will be updated.",
+    "lineNumber": 113,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Number"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 13,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorCounter",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorCounter",
+    "access": "private",
+    "description": "A utility counter to know how many dos will be added to the indicator",
+    "lineNumber": 120,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Number"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 14,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorLimit",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorLimit",
+    "access": "private",
+    "description": "After this many iterations, the dots will start to be removed instead of added. When the\ncounter hits 0, it will start adding again, until it hits this limit.",
+    "lineNumber": 128,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Number"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 15,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorIncrease",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorIncrease",
+    "access": "private",
+    "description": "A flag to know if the indicator it's currently adding dots or removing them.",
+    "lineNumber": 135,
+    "ignore": true,
+    "type": {
+      "nullable": null,
+      "types": [
+        "Boolean"
+      ],
+      "spread": false,
+      "description": null
+    }
+  },
+  {
+    "__docId__": 16,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "canUpload",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#canUpload",
+    "access": "public",
+    "description": "After the class is istantiated, this method can be used to check if the url is valid and\nif the method `upload` can be called",
+    "lineNumber": 148,
+    "params": [],
+    "return": {
+      "types": [
+        "*"
+      ]
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 17,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "upload",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#upload",
+    "access": "public",
+    "description": "Upload your documentation to the ESDoc API.",
+    "lineNumber": 157,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "Function"
+        ],
+        "spread": false,
+        "optional": true,
+        "defaultValue": "()",
+        "defaultRaw": "()",
+        "name": "callback",
+        "description": "=> {}] - An optional callback to be executed after\neverthing is ready."
+      }
+    ],
+    "generator": false
+  },
+  {
+    "__docId__": 18,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_callback",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_callback",
+    "access": null,
+    "description": null,
+    "lineNumber": 164,
+    "undocument": true,
+    "type": {
+      "types": [
+        "*"
+      ]
+    }
+  },
+  {
+    "__docId__": 19,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_uploading",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_uploading",
+    "access": null,
+    "description": null,
+    "lineNumber": 165,
+    "undocument": true,
+    "type": {
+      "types": [
+        "boolean"
+      ]
+    }
+  },
+  {
+    "__docId__": 20,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_retrieveUrlFromPackage",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_retrieveUrlFromPackage",
+    "access": "private",
+    "description": "Tries to retrieve the repository url from your `pacakge.json`.",
+    "lineNumber": 197,
+    "ignore": true,
+    "params": [],
+    "return": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": "The repository url that was on your `package.json`."
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 21,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_buildUrl",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_buildUrl",
+    "access": "private",
+    "description": "Generates a new url with the required format to use with the ESDoc API.",
+    "lineNumber": 236,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "author",
+        "description": "The GitHub username."
+      },
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "repository",
+        "description": "The repository name."
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": "The new url, on the required format for ESDoc."
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 22,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_validateUrl",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_validateUrl",
+    "access": "private",
+    "description": "Validates a given url to see if it has the required format by the ESDoc API.",
+    "lineNumber": 251,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "url",
+        "description": "The url to validate."
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "String",
+        "null"
+      ],
+      "spread": false,
+      "description": "If the url it's valid, it will return it, otherwise, itw will\nreturn null."
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 23,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_startAsking",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_startAsking",
+    "access": "private",
+    "description": "This method is called after the initial request to the API, and tells the class to check\nevery X seconds to see if the documentation was uploaded.",
+    "lineNumber": 265,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 24,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_ask",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_ask",
+    "access": "private",
+    "description": "It makes a request to check if the documentation was uploaded or not.",
+    "lineNumber": 273,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 25,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_finish",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_finish",
+    "access": "private",
+    "description": "This method is called after it's confirmed that the documentation was successfully uploaded,\nand it stops teh indicator, logs a mesage with the url for the documetation and invokes the\ncallback set in the `upload()` method.",
+    "lineNumber": 294,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 26,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_uploading",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_uploading",
+    "access": null,
+    "description": null,
+    "lineNumber": 295,
+    "undocument": true,
+    "type": {
+      "types": [
+        "boolean"
+      ]
+    }
+  },
+  {
+    "__docId__": 27,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_getAPIUrl",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_getAPIUrl",
+    "access": "private",
+    "description": "Returns a url for the ESDoc API.",
+    "lineNumber": 309,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "type",
+        "description": "The type of url you need. This is parameter it's the key for the\n                        `_api` dictionary."
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "String"
+      ],
+      "spread": false,
+      "description": "It will return the API domain and the value in the `_api` dictionary for\n                 given type."
+    },
+    "generator": false
+  },
+  {
+    "__docId__": 28,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_setAPIUrl",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_setAPIUrl",
+    "access": "private",
+    "description": "Set a new type of urlf or the ESDoc API. For example, the first request will return a\nrelative path for the documentation, this class will use this method to save this path\nso it can be later be retrieved using `_getAPIUrl` and it wil already have the API main\ndomain.",
+    "lineNumber": 322,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "type",
+        "description": "An identifier for your url."
+      },
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "url",
+        "description": "The relative url you want to save."
+      }
+    ],
+    "generator": false
+  },
+  {
+    "__docId__": 29,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_logError",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_logError",
+    "access": "private",
+    "description": "Logs an eror message to the terminal.",
+    "lineNumber": 332,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String",
+          "Error"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "error",
+        "description": "This can be the message you want to log, a key for the\n                              `_messages` dictionary or an `Error` object."
+      }
+    ],
+    "generator": false
+  },
+  {
+    "__docId__": 30,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_startIndicator",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_startIndicator",
+    "access": "private",
+    "description": "Starts showing the progress indicator on the terminal.",
+    "lineNumber": 349,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 31,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorInterval",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorInterval",
+    "access": null,
+    "description": null,
+    "lineNumber": 350,
+    "undocument": true,
+    "type": {
+      "types": [
+        "*"
+      ]
+    }
+  },
+  {
+    "__docId__": 32,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_runIndicator",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_runIndicator",
+    "access": "private",
+    "description": "The actual method that shows the progress indicator on the terminal.",
+    "lineNumber": 357,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 33,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorIncrease",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorIncrease",
+    "access": null,
+    "description": null,
+    "lineNumber": 362,
+    "undocument": true,
+    "type": {
+      "types": [
+        "boolean"
+      ]
+    }
+  },
+  {
+    "__docId__": 34,
+    "kind": "member",
+    "static": false,
+    "variation": null,
+    "name": "_indicatorIncrease",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_indicatorIncrease",
+    "access": null,
+    "description": null,
+    "lineNumber": 367,
+    "undocument": true,
+    "type": {
+      "types": [
+        "boolean"
+      ]
+    }
+  },
+  {
+    "__docId__": 35,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_stopIndicator",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_stopIndicator",
+    "access": "private",
+    "description": "Removes the progress indicator from the terminal.",
+    "lineNumber": 383,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 36,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_restartLine",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_restartLine",
+    "access": "private",
+    "description": "Removes everything on the current terminal line and sets the cursor to the initial\nposition.",
+    "lineNumber": 393,
+    "ignore": true,
+    "params": [],
+    "generator": false
+  },
+  {
+    "__docId__": 37,
+    "kind": "method",
+    "static": false,
+    "variation": null,
+    "name": "_print",
+    "memberof": "src/index.js~ESDocUploader",
+    "longname": "src/index.js~ESDocUploader#_print",
+    "access": "private",
+    "description": "Writes a message in the terminal.",
+    "lineNumber": 403,
+    "ignore": true,
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "String"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "message",
+        "description": "The text to write."
+      }
+    ],
+    "generator": false
+  },
+  {
+    "__docId__": 39,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Infinity",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Infinity",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Infinity",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 40,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "NaN",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/NaN",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~NaN",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 41,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "undefined",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/undefined",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~undefined",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 42,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "null",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/null",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~null",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 43,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Object",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 44,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~object",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 45,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Function",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 46,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~function",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 47,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Boolean",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 48,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~boolean",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 49,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Symbol",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Symbol",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 50,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Error",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Error",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 51,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "EvalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~EvalError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 52,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "InternalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~InternalError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 53,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "RangeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RangeError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 54,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "ReferenceError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ReferenceError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 55,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "SyntaxError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~SyntaxError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 56,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "TypeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~TypeError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 57,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "URIError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~URIError",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 58,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Number",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 59,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~number",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 60,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Date",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Date",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 61,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "String",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~String",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 62,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "string",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~string",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 63,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "RegExp",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RegExp",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 64,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 65,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int8Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 66,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 67,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint8ClampedArray",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8ClampedArray",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 68,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int16Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 69,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint16Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 70,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Int32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 71,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Uint32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 72,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Float32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float32Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 73,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Float64Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float64Array",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 74,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Map",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Map",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 75,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Set",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Set",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 76,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "WeakMap",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakMap",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 77,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "WeakSet",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakSet",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 78,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "ArrayBuffer",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ArrayBuffer",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 79,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "DataView",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~DataView",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 80,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "JSON",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~JSON",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 81,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Promise",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Promise",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 82,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Generator",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Generator",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 83,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "GeneratorFunction",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~GeneratorFunction",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 84,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Reflect",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Reflect",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 85,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Proxy",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Proxy",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 87,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "CanvasRenderingContext2D",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~CanvasRenderingContext2D",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 88,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "DocumentFragment",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/DocumentFragment",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~DocumentFragment",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 89,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Element",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Element",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Element",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 90,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Event",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Event",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Event",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 91,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "Node",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Node",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~Node",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 92,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "NodeList",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/NodeList",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~NodeList",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 93,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "XMLHttpRequest",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/XMLHttpRequest",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~XMLHttpRequest",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 94,
+    "kind": "external",
+    "static": true,
+    "variation": null,
+    "name": "AudioContext",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/AudioContext",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "longname": "BuiltinExternal/WebAPIExternal.js~AudioContext",
+    "access": null,
+    "description": null,
+    "builtinExternal": true
+  }
+]

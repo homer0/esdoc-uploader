@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl">
+  <title data-ice="title">Home | esdoc-uploader</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  <script src="script/manual.js"></script>
+<meta name="description" content="Upload your ESDoc documentation to doc.esdoc.org"><meta property="twitter:card" content="summary"><meta property="twitter:title" content="esdoc-uploader"><meta property="twitter:description" content="Upload your ESDoc documentation to doc.esdoc.org"></head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+<a style="position:relative; top:3px;" href="https://github.com/homer0/esdoc-uploader"><img width="20px" src="./image/github.png"></a></header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-class">C</span><span data-ice="name"><span><a href="class/src/index.js~ESDocUploader.html">ESDocUploader</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-typedef">T</span><span data-ice="name"><span><a href="typedef/index.html#static-typedef-UploadCallback">UploadCallback</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><div data-ice="index" class="github-markdown"><h1 id="esdoc-uploader">esdoc-uploader</h1><p>A node module that connects with the <a href="https://doc.esdoc.org/">ESDoc hosting service</a> API in order to generage the documentation for your project.</p>
+<p><a href="https://travis-ci.org/homer0/esdoc-uploader"><img src="https://img.shields.io/travis/homer0/esdoc-uploader.svg?style=flat-square" alt="Travis"></a>
+<a href="https://coveralls.io/github/homer0/esdoc-uploader?branch=master"><img src="https://img.shields.io/coveralls/github/homer0/esdoc-uploader.svg?style=flat-square" alt="Coveralls github"></a>
+<a href="https://david-dm.org/homer0/esdoc-uploader"><img src="https://img.shields.io/david/homer0/esdoc-uploader.svg?style=flat-square" alt="David"></a>
+<a href="https://david-dm.org/homer0/esdoc-uploader"><img src="https://img.shields.io/david/dev/homer0/esdoc-uploader.svg?style=flat-square" alt="David"></a></p>
+<p>I&apos;ve been using <a href="https://esdoc.org">ESDoc</a> for a while now, and something great about it it&apos;s that they provide a <a href="https://doc.esdoc.org/">hosting service</a> for your documentation. You only need to have your project hosted on GitHub and give them with its url, the service will take care of cloning your repo, finding your <code>esdoc.json</code> file, generating the docs and publishing them, which I think it&apos;s pretty awesome!</p>
+<p>Now, the only complication it&apos;s that every time you deploy a new change, you have to go to the page and submit a form with your repo url; but if you are working with <strong>continuous integration</strong>, doing that manually kind of kills the whole idea :P... and that&apos;s the reason of this project.</p>
+<blockquote>
+<p><strong>Disclaimer (2019):</strong> This project is still maintained, but there&apos;s no activity because the ESDoc hosting API doesn&apos;t have any other functionality, so no features will be added.</p>
+<p>If you are wondering why this project doesn&apos;t &quot;use itself&quot;, it&apos;s because I no longer see the need to transpile Node code, and I can&apos;t use <code>esdoc-node</code> on the ESDoc hosting,
+so I&apos;m using git pages.</p>
+<p>If you read the code... I know:</p>
+<ol>
+<li>It should use promises.</li>
+<li>It should separate the functionality on different modules.</li>
+<li>I can use <code>node-fetch</code> or <code>axios</code> for the requests.</li>
+<li>I can use <code>colors</code> or <code>chalk</code> for the log messages.</li>
+<li>and so many more things...</li>
+</ol>
+<p>This project was one of my first npm packages, its scope is very limited, and when I updated it, I didn&apos;t want to completely rewrite it, just improve little details (what I could) while removing the need for production dependencies. </p>
+</blockquote>
+<h2 id="information">Information</h2><table>
+<thead>
+<tr>
+<th>-</th>
+<th>-</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Package</td>
+<td>esdoc-uploader</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>Upload your ESDoc documentation to doc.esdoc.org</td>
+</tr>
+<tr>
+<td>Node Version</td>
+<td>&gt;= v8.10</td>
+</tr>
+</tbody>
+</table>
+<h2 id="usage">Usage</h2><h3 id="command-line">Command line</h3><pre><code class="lang-bash"><code class="source-code prettyprint">npx esdoc-uploader
+# or
+yarn esdoc-uploader</code>
+</code></pre>
+<p>That&apos;s all, <code>esdoc-uploader</code> will automatically look up your <code>package.json</code>, get your repository information and start the process.</p>
+<h3 id="as-a-module">As a module</h3><pre><code class="lang-javascript"><code class="source-code prettyprint">// Import the module class
+var ESDocUploader = require(&apos;esdoc-uploader&apos;);
+
+// Instantiate an object with a valid url
+var uploader = new ESDocUploader(&apos;git@github.com:homer0/gulp-bundlerify.git&apos;);
+
+// For extra precaution, check if the url is valid
+if (uploader.canUpload()) {
+  uploader.upload((success, url) =&gt; {
+    // Checks whether the process ended in success
+    if (success) {
+      // Logs a confirmation
+      console.log(&apos;Documents uploaded to: &apos;, url);
+    } else {
+      console.log(&apos;Something went wrong, check the errors above&apos;);
+    }
+  });
+}</code>
+</code></pre>
+<p>Pretty simple right? it only has three public methods:</p>
+<ul>
+<li>The <code>constructor</code>, which receives an already formatted GitHub url. Or you can ignore the argument and it will work just like on the command line, looking for the information in your <code>package.json</code>.</li>
+<li><code>canUpload()</code>: It checks if the upload process can be done or not.</li>
+<li><code>upload()</code>: It starts uploading everything to the API. It receives a callback parameter, which will be called when the process finishes. The callback will then receive two arguments: a <code>boolean</code> value to check if the process was successful, and in case it was, the url for where the documentation it&apos;s being hosted. </li>
+</ul>
+<h2 id="development">Development</h2><h3 id="npm-yarn-tasks">NPM/Yarn tasks</h3><table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test</code></td>
+<td>Run the project unit tests.</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td>Lint the modified files.</td>
+</tr>
+<tr>
+<td><code>lint:all</code></td>
+<td>Lint the entire project code.</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td>Generate the project documentation.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="repository-hooks">Repository hooks</h3><p>I use <a href="https://yarnpkg.com/en/package/husky">husky</a> to automatically install the repository hooks so the code will be tested and linted before any commit and the dependencies updated after every merge. The configuration is on the <code>husky</code> property of the <code>package.json</code> and the hooks&apos; files are on <code>./utils/hooks</code>.</p>
+<h3 id="testing">Testing</h3><p>I use <a href="https://facebook.github.io/jest/">Jest</a> with <a href="https://yarnpkg.com/en/package/jest-ex">Jest-Ex</a> to test the project. The configuration file is on <code>./.jestrc.json</code>, the tests are on <code>./tests</code> and the script that runs it is on <code>./utils/scripts/test</code>.</p>
+<h3 id="linting">Linting</h3><p>I use <a href="http://eslint.org">ESlint</a> with <a href="http://yarnpkg.com/en/package/eslint-plugin-homer0">my own custom configuration</a> to validate all the JS code. The configuration file for the project code is on <code>./.eslintrc</code> and the one for the tests is on <code>./tests/.eslintrc</code>. There&apos;s also an <code>./.eslintignore</code> to exclude some files on the process. The script that runs it is on <code>./utils/scripts/lint</code>.</p>
+<h3 id="documentation">Documentation</h3><p>I use <a href="http://esdoc.org">ESDoc</a> (:P) to generate HTML documentation for the project. The configuration file is on <code>./.esdoc.json</code> and the script that runs it is on <code>./utils/scripts/docs</code>.</p>
+<h2 id="license">License</h2><p>MIT. <a href="./LICENSE">License file</a>.</p>
+</div>
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(1.1.0)</span><img src="./image/esdoc-logo-mini-black.png"></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>
