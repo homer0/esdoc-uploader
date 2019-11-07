@@ -29,14 +29,10 @@
     "wootils": "^2.6.5"
   },
   "scripts": {
-    "build": "babel --presets es2015 -d dist/ src/",
-    "prepublish": "npm run build",
     "test": "./utils/scripts/test",
-    "coverage": "npm test; open ./coverage/lcov-report/index.html",
     "lint": "./utils/scripts/lint",
     "lint:all": "./utils/scripts/lint-all",
-    "docs": "./utils/scripts/docs",
-    "deploy-docs": "node ./dist/uploader.js"
+    "docs": "./utils/scripts/docs"
   },
   "bin": {
     "esdoc-uploader": "./src/uploader.js"
